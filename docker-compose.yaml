@@ -1,0 +1,108 @@
+version: '3.9'
+services:
+  metabased-cockroach:
+    image: metabase/metabase-enterprise:v1.47.4
+    container_name: metabased-cockroach
+    hostname: metabase
+    volumes: 
+    - /dev/urandom:/dev/random:ro
+    ports:
+      - 3031:3000
+    environment: 
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: 5432
+      MB_DB_USER: metabase
+      MB_DB_PASS: mysecretpassword
+      MB_DB_HOST: postgres-app-db
+      MB_SITE_URL: http://localhost:3031
+      MB_EMAIL_SMTP_HOST=maildev: sub
+      MB_EMAIL_SMTP_PASSWORD: password
+      MB_EMAIL_SMTP_PORT: 25
+      MB_EMAIL_SMTP_SECURITY: none
+      MB_EMAIL_SMTP_USERNAME: admin
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 3072M
+        reservations:
+          cpus: '4'
+          memory: 1536M
+    networks: 
+      - metanet1d-cockroach
+    depends_on:
+      - postgres-app-dbd-cockroach
+    healthcheck:
+      test: curl --fail -X GET -I http://localhost:3000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+  postgres-app-dbd-cockroach:
+    image: postgres:16-alpine
+    container_name: postgres-app-dbd-cockroach
+    hostname: postgres-app-db
+    ports:
+      - 5432:5432
+    environment:
+      - "POSTGRES_USER=metabase"
+      - "POSTGRES_DB=metabase"
+      - "POSTGRES_PASSWORD=mysecretpassword"
+    networks: 
+      - metanet1d-cockroach
+    cpus: 1
+    mem_limit: 128m
+    command: -c log_statement=all
+  setup-cockroach:
+    build: setup/.
+    container_name: setup-cockroach
+    volumes:
+      - $PWD/setup/setup.py:/app/setup.py
+    networks:
+      - metanet1d-cockroach
+    depends_on:
+      metabased-cockroach:
+        condition: service_healthy
+    command: python /app/setup.py
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 64M
+        reservations:
+          cpus: '0.5'
+          memory: 32M
+    environment:
+      host: http://metabase
+      port: 3000
+      dbs: 1
+  crdb:
+   image: cockroachdb/cockroach:v23.1.11
+   volumes:
+      - $PWD/cockroachdb-data:/docker-entrypoint-initdb.d
+   ports:
+     - "26257:26257"
+     - "8080:8080"
+   command: start-single-node
+   networks:
+    - metanet1d-cockroach
+   container_name: cockroach
+   hostname: cockroach
+   environment:
+      - "COCKROACH_USER=metabase"
+      - "COCKROACH_DATABASE=sample"
+      - "COCKROACH_PASSWORD=metasample123"
+  maildev-subd-cockroach:
+    image: maildev/maildev:2.1.0
+    container_name: maildev-subd-cockroach
+    hostname: maildev-sub
+    ports:
+    - "3001:80"
+    - "3025:25"
+    networks:
+    - metanet1d-cockroach
+    cpus: 1
+    mem_limit: 128m
+networks: 
+  metanet1d-cockroach:
+    driver: bridge
